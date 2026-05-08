@@ -20,7 +20,7 @@ AI 驱动的课堂录播整理工具 —— 把字幕、转录文本和视频整
 
 ```bash
 # 克隆仓库
-git clone <repo-url> srt-summarizer-skill
+git clone https://github.com/AsukaIIV/srt-summarizer-skill srt-summarizer-skill
 
 # 注册为 Claude Code Skill（软链接到 skills 目录）
 mkdir -p ~/.claude/skills
