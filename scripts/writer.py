@@ -217,6 +217,7 @@ def inject_images_into_markdown(
 
     screenshot_entries, diagram_entries = _split_entry_kinds(image_entries)
     next_image_number = 1
+    anchored = content
 
     if screenshot_entries:
         # Phase 1: replace explicit anchors
