@@ -37,22 +37,17 @@ def build_output_paths(
 
     Output convention::
 
-        {YYYY-MM-DD}_{课程名}/
-        ├── {YYYY-MM-DD}_{课程名}_课堂总结.md
+        {源文件stem}_{课程名}/
+        ├── {源文件stem}_{课程名}_课堂总结.md
         └── imgs/
     """
-    date_label = _extract_date_label(source_file)
+    stem = sanitize_filename(
+        os.path.splitext(os.path.basename(source_file))[0], fallback="未命名文件"
+    )
     course = sanitize_filename(course_name, fallback="未命名课程")
 
-    if date_label:
-        bundle_name = f"{date_label}_{course}"
-        note_filename = f"{date_label}_{course}_课堂总结.md"
-    else:
-        stem = sanitize_filename(
-            os.path.splitext(os.path.basename(source_file))[0], fallback="未命名文件"
-        )
-        bundle_name = f"{stem}_{course}"
-        note_filename = f"{stem}_{course}_课堂总结.md"
+    bundle_name = f"{stem}_{course}"
+    note_filename = f"{stem}_{course}_课堂总结.md"
 
     bundle_dir = os.path.join(save_dir, bundle_name)
     img_dir = os.path.join(bundle_dir, "imgs")
@@ -377,8 +372,23 @@ def inject_images_into_markdown(
                 next_image_number = image_number
 
     if diagram_entries:
-        diagram_block = _build_appendix_block(diagram_entries, next_image_number)
-        anchored = normalize_markdown(f"{anchored}\n{diagram_block}")
+        # Inject diagrams before ## 结构化图示输出 if present, otherwise append.
+        # Never place content after the structured-diagram JSON block.
+        json_section_re = re.compile(
+            r"\n##\s+结构化图示输出\s*\n```json\b", re.MULTILINE
+        )
+        json_match = json_section_re.search(anchored)
+        if json_match:
+            diagram_block = _build_appendix_block(diagram_entries, next_image_number)
+            anchored = (
+                anchored[: json_match.start()]
+                + "\n"
+                + diagram_block
+                + anchored[json_match.start() :]
+            )
+        else:
+            diagram_block = _build_appendix_block(diagram_entries, next_image_number)
+            anchored = normalize_markdown(f"{anchored}\n{diagram_block}")
 
     return anchored
 
@@ -396,24 +406,28 @@ def write_summary(
     the existing file body is read and used as the content.
     """
     dt = now or datetime.now()
-    stem = os.path.splitext(os.path.basename(source_path))[0]
+    date_label = _extract_date_label(source_path)
 
     if not content and os.path.isfile(out_path):
         with open(out_path, "r", encoding="utf-8") as f:
             existing = f.read()
         # Strip a previously-written header block if present
         existing = re.sub(r"^#[^\n]+\n\n>.*?---\n\n", "", existing, flags=re.DOTALL)
+        existing = re.sub(r"^---\n.*?\n---\n\n", "", existing, flags=re.DOTALL)
         content = existing.strip()
 
     normalized = inject_images_into_markdown(content or "", image_entries or [])
 
+    # Build YAML frontmatter — Obsidian-compatible, no #-heading before ## 一、课程概要
+    frontmatter_lines = ["---"]
+    if date_label:
+        frontmatter_lines.append(f"date: {date_label}")
+    frontmatter_lines.append(f"source: {os.path.basename(source_path)}")
+    frontmatter_lines.append(f"generated: {dt.strftime('%Y-%m-%d')}")
+    frontmatter_lines.append("---")
+    frontmatter = "\n".join(frontmatter_lines) + "\n\n"
+
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write(f"# {stem} 课堂总结\n\n")
-        f.write(
-            f"> 生成时间：{dt.strftime('%Y-%m-%d %H:%M:%S')}  \n"
-            f"> 源文件：`{source_path}`  \n"
-            f"> 生成工具：SRT-SUMMARIZER Skill (Claude Code)\n\n"
-            f"---\n\n"
-        )
+        f.write(frontmatter)
         f.write(normalized)
