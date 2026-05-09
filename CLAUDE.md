@@ -46,7 +46,7 @@
 7. 文本密度 + CJK 比例
 8. 内容重复度
 
-评分区间：≥75 good | 45-74 medium | <45 poor。`quality_guidance()` 根据等级返回策略指令。
+评分区间：≥80 good | 50-79 medium | <50 poor。`quality_guidance()` 根据等级返回策略指令。
 
 ## 不做什么
 
