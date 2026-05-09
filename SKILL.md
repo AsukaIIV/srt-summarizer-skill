@@ -204,10 +204,14 @@ diagram_entries, render_warnings = render_diagram_entries(diagram_specs, image_d
 ```python
 from scripts.writer import build_output_paths, write_summary
 
+# lesson_title 由 Claude 根据课堂内容生成，格式建议：
+#   {YYYY-MM-DD}_{第X周}_{本节主题}
+# save_dir 使用课程文件夹，如 "通信电子线路"
 bundle_dir, img_dir, note_path = build_output_paths(
     source_file=lesson["transcript_path"],
-    save_dir=output_dir,
+    save_dir=output_dir,       # 课程文件夹
     course_name=course_name,
+    lesson_title=lesson_title,  # 每节课的目录名和笔记文件名
 )
 
 # 合并截图条目和图示条目
@@ -242,19 +246,36 @@ write_summary(
 
 ## 输出目录结构
 
-每个课程生成一个独立目录。若字幕文件名以 `YYYYMMDD` 开头，自动提取日期：
+**每节课必须独立目录**，保证笔记多了之后便于管理。课程文件夹为顶层容器，每节课在该文件夹内拥有独立子目录：
 
 ```text
-{YYYY-MM-DD}_{课程名}/
-├── {YYYY-MM-DD}_{课程名}_课堂总结.md
-└── imgs/
-    ├── 2026-05-08_课程名_001_frame-hh-mm-ss.png  # 课堂截图
-    └── diagram_01_comparison.png                  # 结构化图示
+{课程名}/
+└── {课程目录名}/
+    ├── {课程目录名}.md
+    └── imgs/
+        ├── 2026-05-08_课程名_001_frame-hh-mm-ss.png  # 课堂截图
+        └── diagram_01_comparison.png                  # 结构化图示
 ```
 
-文件名不含日期时回退为 `{stem}_{课程名}/`。
+- `{课程名}`：课程文件夹，同一课程的所有笔记都在此目录下
+- `{课程目录名}`：每节课的独立子目录，命名建议为 `{YYYY-MM-DD}_{第X周}_{本节主题}`
+- 笔记 `.md` 文件与 `imgs/` 平级放在该子目录内
 
-默认输出到字幕文件所在目录。用户可指定输出目录。
+示例：
+
+```text
+通信电子线路/
+├── 2026-03-31_第5周_丙类谐振功放直流馈电与偏置电路/
+│   ├── 2026-03-31_第5周_丙类谐振功放直流馈电与偏置电路.md
+│   └── imgs/
+│       └── diagram_01_comparison.png
+└── 2026-04-07_第6周_倍频器与D类功放/
+    ├── 2026-04-07_第6周_倍频器与D类功放.md
+    └── imgs/
+        └── diagram_01_flow.png
+```
+
+默认输出到当前工作目录。用户可指定输出目录。
 
 ## 注意事项
 

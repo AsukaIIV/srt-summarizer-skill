@@ -31,23 +31,34 @@ def _extract_date_label(filename: str) -> str:
 
 
 def build_output_paths(
-    source_file: str, save_dir: str, course_name: str
+    source_file: str,
+    save_dir: str,
+    course_name: str,
+    lesson_title: str = "",
 ) -> tuple[str, str, str]:
     """Return (bundle_dir, image_dir, note_path).
 
-    Output convention::
+    Output convention (per-lesson directory)::
 
-        {源文件stem}_{课程名}/
-        ├── {源文件stem}_{课程名}_课堂总结.md
-        └── imgs/
+        {课程名}/
+        └── {课程目录名}/
+            ├── {课程目录名}.md
+            └── imgs/
+
+    If *lesson_title* is provided, it is used as the bundle directory name
+    and note filename. Otherwise, a name is auto-generated from the source
+    file stem and course name.
     """
-    stem = sanitize_filename(
-        os.path.splitext(os.path.basename(source_file))[0], fallback="未命名文件"
-    )
-    course = sanitize_filename(course_name, fallback="未命名课程")
-
-    bundle_name = f"{stem}_{course}"
-    note_filename = f"{stem}_{course}_课堂总结.md"
+    if lesson_title:
+        bundle_name = sanitize_filename(lesson_title, fallback="未命名课程")
+        note_filename = f"{bundle_name}.md"
+    else:
+        stem = sanitize_filename(
+            os.path.splitext(os.path.basename(source_file))[0], fallback="未命名文件"
+        )
+        course = sanitize_filename(course_name, fallback="未命名课程")
+        bundle_name = f"{stem}_{course}"
+        note_filename = f"{stem}_{course}_课堂总结.md"
 
     bundle_dir = os.path.join(save_dir, bundle_name)
     img_dir = os.path.join(bundle_dir, "imgs")
