@@ -118,6 +118,29 @@ guidance = quality_guidance(report)  # 质量引导指令，good 时为空
 
 `quality_guidance()` 返回的指令**必须原样拼接**到最终 prompt 的转录文本之前。
 
+#### 第二步附加：领域分类
+
+质量评估完成后，**必须运行领域分类器**，判断课程属于 STEM 还是社会科学，以调整生成策略：
+
+```python
+from scripts.parse_srt import classify_domain, domain_guidance
+
+domain_report = classify_domain(
+    segments,
+    course_name=course_name,
+    transcript_path=lesson["transcript_path"],
+)
+print(domain_report.summary())        # 如 "领域分类：社科/人文 (置信度 85%)"
+domain_guide = domain_guidance(domain_report)  # STEM 时为空字符串
+```
+
+分类基于三路加权信号：
+1. 课程名关键词匹配（权重 3x）
+2. 字幕内容关键词采样（权重 1x，采样 200 段）
+3. 文件名关键词匹配（权重 2x）
+
+`domain_guidance()` 对 STEM 返回空字符串（`system.md` 已为 STEM 优化），对社科类返回正文要素替换、考试栏目调整、图示类型偏好等指令。`domain_guidance()` 返回的指令**必须在 quality_guidance 之后、转录文本之前**拼接到 prompt 中。
+
 ### 第三步：提取视频截图（可选）
 
 如果 lesson 有配对的视频且用户需要图文混排：
@@ -154,6 +177,7 @@ saved_paths, frame_items = extract_frames(
    - **四、作业与考试重点**（作业题目、必考公式汇总表、必记概念清单、答题规范）
    - **五、课程总结**（5-8句脉络概括 + 下节课预告）
 6. 如果内容适合，在末尾输出 `## 结构化图示输出` 区块，包含 JSON 格式的图示规格
+7. 将质量引导指令（`quality_guidance`）和领域引导指令（`domain_guidance`）拼接后，放在转录文本之前，形成完整的用户 prompt
 
 **重要约束**（已在 system.md 中详细规定）：
 - 严格五段结构，不得缺段、并段、重排
@@ -218,17 +242,19 @@ write_summary(
 
 ## 输出目录结构
 
-每个课程生成一个独立目录：
+每个课程生成一个独立目录。若字幕文件名以 `YYYYMMDD` 开头，自动提取日期：
 
 ```text
-{课程文件名}_{来源目录}_{课程名}/
-├── {课程文件名}_{课程名}_课堂总结.md
+{YYYY-MM-DD}_{课程名}/
+├── {YYYY-MM-DD}_{课程名}_课堂总结.md
 └── imgs/
-    ├── 20260508_课程名_001_frame-hh-mm-ss.png  # 课堂截图
-    └── diagram_01_comparison.png                # 结构化图示
+    ├── 2026-05-08_课程名_001_frame-hh-mm-ss.png  # 课堂截图
+    └── diagram_01_comparison.png                  # 结构化图示
 ```
 
-默认输出到当前工作目录。用户可指定输出目录。
+文件名不含日期时回退为 `{stem}_{课程名}/`。
+
+默认输出到字幕文件所在目录。用户可指定输出目录。
 
 ## 注意事项
 

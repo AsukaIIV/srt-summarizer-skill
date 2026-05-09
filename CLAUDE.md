@@ -18,7 +18,7 @@
 | `SKILL.md` | Skill 定义 + 工作流指令 | 面向 Claude 的指令，不是面向用户的文档 |
 | `prompts/system.md` | 笔记生成系统提示词 | 定义五段结构、禁止项、格式规范、自检清单 |
 | `scripts/scanner.py` | 目录扫描 + 字幕视频配对 | Jaccard 相似度配对逻辑，无状态纯函数 |
-| `scripts/parse_srt.py` | SRT 时间轴解析 + 质量评估 | 8 维评分系统，质量引导指令生成 |
+| `scripts/parse_srt.py` | SRT 时间轴解析 + 质量评估 + 领域分类 | 8 维评分系统，质量/领域引导指令生成 |
 | `scripts/video_frames.py` | 视频关键帧提取 | 需 opencv-python，无则优雅降级 |
 | `scripts/diagram_renderer.py` | 结构化图示 JSON 提取 + PNG 渲染 | 需 Pillow，支持 comparison/flow/formula_map 三种模板 |
 | `scripts/writer.py` | Markdown 组装 + 图片语义注入 + 文件写出 | 注入策略：锚点替换 → 章节匹配 → 末位附录 |
@@ -47,6 +47,16 @@
 8. 内容重复度
 
 评分区间：≥80 good | 50-79 medium | <50 poor。`quality_guidance()` 根据等级返回策略指令。
+
+## 领域分类系统
+
+`parse_srt.py` 的 `classify_domain()` 判断课程属于 STEM 还是社会科学：
+
+1. 课程名关键词匹配（权重 3x）
+2. 字幕内容关键词采样（权重 1x，采样 200 段）
+3. 文件名关键词匹配（权重 2x）
+
+`domain_guidance()` 对社科类返回补充指令（替换公式要素为理论框架、调整考试栏目格式）；对 STEM 类返回空字符串（`system.md` 已为 STEM 优化）。置信度 < 0.3 时也不注入，防止误判。
 
 ## 不做什么
 

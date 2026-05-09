@@ -3,6 +3,7 @@
 Adapted from srt_summarizer/processing/file_loader.py
 """
 
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -12,6 +13,25 @@ from scripts._utils import format_seconds
 SRT_TIME_RE = re.compile(
     r"(?P<start>\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2}[,.]\d{3})"
 )
+
+# ---- Domain classification patterns ----
+
+STEM_KEYWORDS: set[str] = {
+    "数学", "物理", "化学", "电路", "电子", "信号", "通信",
+    "编程", "算法", "计算机", "工程", "力学", "光学", "电磁",
+    "量子", "微积分", "线性代数", "概率论", "代码", "方程",
+    "公式", "推导", "半导体", "晶体管", "放大器", "滤波器",
+    "调制", "解调", "傅里叶", "拉普拉斯", "微分", "积分",
+    "数据结构", "操作系统", "网络协议", "编译原理", "体系结构",
+}
+
+SOCIAL_SCIENCE_KEYWORDS: set[str] = {
+    "历史", "哲学", "政治", "经济", "社会", "管理", "法律",
+    "心理", "教育", "文学", "艺术", "文化", "伦理", "马克思",
+    "毛概", "思修", "概论", "思想", "制度", "政策", "国际关系",
+    "社会学", "经济学", "法学", "行政", "组织行为", "公共管理",
+    "近代史", "思想政治", "道德", "法治", "治理",
+}
 
 # ---- Quality assessment patterns ----
 
@@ -344,6 +364,147 @@ def quality_guidance(report: QualityReport) -> str:
     if report_md:
         parts.append(report_md)
 
+    return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Domain classification
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DomainReport:
+    """Domain classification result for a transcript."""
+    domain: str = "stem"
+    confidence: float = 0.0
+    stem_score: float = 0.0
+    social_science_score: float = 0.0
+    source_signals: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        label = {"stem": "STEM/理工", "social_science": "社科/人文"}
+        return (
+            f"领域分类：{label.get(self.domain, self.domain)} "
+            f"(置信度 {self.confidence:.0%})"
+        )
+
+
+def classify_domain(
+    segments: list[dict],
+    course_name: str = "",
+    transcript_path: str = "",
+) -> DomainReport:
+    """Classify a transcript as STEM or social science.
+
+    Detection signals (weighted):
+    1. Course name keyword match (3x)
+    2. Content keyword frequency from transcript sampling (1x)
+    3. Filename keyword match (2x)
+    """
+    report = DomainReport()
+    stem_hits: float = 0.0
+    ss_hits: float = 0.0
+    signals: list[str] = []
+
+    # Signal 1: Course name keywords (weight 3x)
+    if course_name:
+        name_tokens = re.split(r"[\s\-_（）()【】\[\]：:，,]+", course_name)
+        for token in name_tokens:
+            if not token:
+                continue
+            for kw in STEM_KEYWORDS:
+                if kw in token:
+                    stem_hits += 3.0
+                    signals.append(f"course_name_stem: {kw}")
+            for kw in SOCIAL_SCIENCE_KEYWORDS:
+                if kw in token:
+                    ss_hits += 3.0
+                    signals.append(f"course_name_ss: {kw}")
+
+    # Signal 2: Content keyword sampling (weight 1x, sample up to 200 segments)
+    if segments:
+        sample_step = max(1, len(segments) // 200)
+        sampled_text = " ".join(
+            seg.get("text", "")
+            for i, seg in enumerate(segments)
+            if i % sample_step == 0
+        )
+        for kw in STEM_KEYWORDS:
+            count = sampled_text.count(kw)
+            if count:
+                stem_hits += count
+                if count >= 3:
+                    signals.append(f"content_stem: {kw}:{count}")
+        for kw in SOCIAL_SCIENCE_KEYWORDS:
+            count = sampled_text.count(kw)
+            if count:
+                ss_hits += count
+                if count >= 3:
+                    signals.append(f"content_ss: {kw}:{count}")
+
+    # Signal 3: Filename keywords (weight 2x)
+    if transcript_path:
+        fname_stem = os.path.splitext(os.path.basename(transcript_path))[0]
+        for kw in STEM_KEYWORDS:
+            if kw in fname_stem:
+                stem_hits += 2.0
+                signals.append(f"filename_stem: {kw}")
+        for kw in SOCIAL_SCIENCE_KEYWORDS:
+            if kw in fname_stem:
+                ss_hits += 2.0
+                signals.append(f"filename_ss: {kw}")
+
+    report.stem_score = stem_hits
+    report.social_science_score = ss_hits
+
+    if stem_hits == 0 and ss_hits == 0:
+        report.domain = "stem"
+        report.confidence = 0.0
+        report.source_signals = ["no_signal_found"]
+        return report
+
+    total = stem_hits + ss_hits
+    report.confidence = abs(stem_hits - ss_hits) / total
+
+    if stem_hits >= ss_hits:
+        report.domain = "stem"
+    else:
+        report.domain = "social_science"
+
+    report.source_signals = signals[:8]
+    return report
+
+
+def domain_guidance(report: DomainReport) -> str:
+    """Generate domain-specific prompt guidance.
+
+    Returns "" for STEM (system.md is already STEM-optimized).
+    Returns social-science adaptations when detected as social science.
+    """
+    if report.domain != "social_science" or report.confidence < 0.3:
+        return ""
+
+    parts: list[str] = [
+        "## 社科类课程特别指引",
+        "",
+        "本次课程识别为**社会科学/人文类**。请在生成笔记时应用以下调整：",
+        "",
+        "### 二、正文内容要素调整",
+        "- 将\"定义/概念 → 公式/定律 → 推导过程 → 物理意义\"替换为：**理论框架 → 论点/论据 → 案例分析 → 学派对比**",
+        "- 不要强行寻找或编造\"公式\"；社科课程的核心是理论主张、论证逻辑和案例支撑",
+        "- 注意提取教师讲解中的**论述题答题框架**（总论点 → 分论点 → 论据要点）",
+        "",
+        "### 四、作业与考试重点调整",
+        "- **将\"必考公式汇总\"表格替换为\"核心理论/学者观点\"表格**：",
+        "  | 理论/观点 | 提出者/学派 | 核心内容 | 适用分析场景 |",
+        "- **增加论述题答题框架**：若教师提及可能的论述题方向，列出总分总结构要点",
+        "- **必记概念清单**使用名词解释风格：每条附简短解释（考试中可能作为名词解释题出现）",
+        "",
+        "### 结构化图示调整",
+        "- 优先使用 `comparison`（学派对比、制度对比、概念辨析）和 `flow`（逻辑推演、历史进程）",
+        "- 不使用 `formula_map`",
+        "- 若内容适合展示概念关系，使用 `comparison` 类型的双栏对比",
+    ]
     return "\n\n".join(parts)
 
 

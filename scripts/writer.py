@@ -19,18 +19,43 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9一-鿿]{2,}")
 
 
 
+DATE_PATTERN = re.compile(r"^(\d{4})(\d{2})(\d{2})")
+
+
+def _extract_date_label(filename: str) -> str:
+    """Extract 'YYYY-MM-DD' from a filename starting with YYYYMMDD."""
+    match = DATE_PATTERN.match(os.path.basename(filename))
+    if match:
+        return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+    return ""
+
+
 def build_output_paths(
     source_file: str, save_dir: str, course_name: str
 ) -> tuple[str, str, str]:
-    """Return (bundle_dir, image_dir, note_path)."""
-    stem = sanitize_filename(os.path.splitext(os.path.basename(source_file))[0], fallback="未命名文件")
-    parent = os.path.basename(os.path.dirname(source_file)).strip()
-    suffix = f"_{sanitize_filename(parent, fallback='未命名目录')}" if parent else ""
+    """Return (bundle_dir, image_dir, note_path).
+
+    Output convention::
+
+        {YYYY-MM-DD}_{课程名}/
+        ├── {YYYY-MM-DD}_{课程名}_课堂总结.md
+        └── imgs/
+    """
+    date_label = _extract_date_label(source_file)
     course = sanitize_filename(course_name, fallback="未命名课程")
-    bundle_name = f"{stem}{suffix}_{course}"
+
+    if date_label:
+        bundle_name = f"{date_label}_{course}"
+        note_filename = f"{date_label}_{course}_课堂总结.md"
+    else:
+        stem = sanitize_filename(
+            os.path.splitext(os.path.basename(source_file))[0], fallback="未命名文件"
+        )
+        bundle_name = f"{stem}_{course}"
+        note_filename = f"{stem}_{course}_课堂总结.md"
+
     bundle_dir = os.path.join(save_dir, bundle_name)
     img_dir = os.path.join(bundle_dir, "imgs")
-    note_filename = f"{stem}_{course}_课堂总结.md" if course != "未命名课程" else f"{stem}_课堂总结.md"
     note_path = os.path.join(bundle_dir, note_filename)
     return bundle_dir, img_dir, note_path
 
@@ -361,13 +386,25 @@ def inject_images_into_markdown(
 def write_summary(
     out_path: str,
     source_path: str,
-    content: str,
+    content: str | None = None,
     image_entries: list[dict[str, str]] | None = None,
     now: datetime | None = None,
 ) -> None:
-    """Write the final summary markdown file."""
+    """Write the final summary markdown file.
+
+    If *content* is None / empty and *out_path* already exists,
+    the existing file body is read and used as the content.
+    """
     dt = now or datetime.now()
     stem = os.path.splitext(os.path.basename(source_path))[0]
+
+    if not content and os.path.isfile(out_path):
+        with open(out_path, "r", encoding="utf-8") as f:
+            existing = f.read()
+        # Strip a previously-written header block if present
+        existing = re.sub(r"^#[^\n]+\n\n>.*?---\n\n", "", existing, flags=re.DOTALL)
+        content = existing.strip()
+
     normalized = inject_images_into_markdown(content or "", image_entries or [])
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
