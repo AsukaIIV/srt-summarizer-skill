@@ -22,12 +22,19 @@ AI 驱动的课堂录播整理工具 —— 把字幕、转录文本和视频整
 # 克隆仓库
 git clone https://github.com/AsukaIIV/srt-summarizer-skill srt-summarizer-skill
 
-# 注册为 Claude Code Skill（软链接到 skills 目录）
-mkdir -p ~/.claude/skills
-ln -s "$(pwd)/srt-summarizer-skill" ~/.claude/skills/srt-summarizer
+# 一键安装
+cd srt-summarizer-skill && bash install.sh
 ```
 
 重启 Claude Code 后生效。
+
+> **双路注册**：`install.sh` 将 skill 注册到 `~/.claude/skills/`（全局可用）。项目内 `.claude/skills/srt-summarizer/` 作为备选路径 —— 当你在此项目目录下打开 Claude Code 时，skill 会被自动发现，无需额外配置。
+
+卸载：
+
+```bash
+bash install.sh --uninstall
+```
 
 ### 2. 安装可选依赖
 
