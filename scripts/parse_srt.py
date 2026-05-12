@@ -5,7 +5,6 @@ Adapted from srt_summarizer/processing/file_loader.py
 
 import os
 import re
-from collections import Counter
 from dataclasses import dataclass, field
 
 from scripts._utils import format_seconds
@@ -237,14 +236,14 @@ def assess_quality(segments: list[dict]) -> QualityReport:
         score -= penalty
         deductions.append((penalty, f"{len(report.noise_segments)}/{total} 段疑似纯噪音"))
 
-    # 5. Duration anomalies — proportional (0..10 pts)
+    # 6. Duration anomalies — proportional (0..10 pts)
     short_pct = len(report.short_segments) / total
     if short_pct > 0:
         penalty = min(round(short_pct * 50), 10)
         score -= penalty
         deductions.append((penalty, f"{len(report.short_segments)}/{total} 段时长过短（<0.3s），可能为碎片化识别"))
 
-    # 6. Text density — continuous penalty
+    # 7. Text density — continuous penalty
     if report.avg_text_len < 5:
         penalty = 18
         deductions.append((penalty, f"平均每段仅 {report.avg_text_len:.0f} 字符，内容极度稀疏"))
@@ -259,14 +258,14 @@ def assess_quality(segments: list[dict]) -> QualityReport:
 
     score -= penalty
 
-    # 7. Chinese character ratio (ASR on Chinese courses should be mostly CJK)
+    # 8. Chinese character ratio (ASR on Chinese courses should be mostly CJK)
     cjk_ratio = cjk_chars / max(total_chars, 1)
     if cjk_ratio < 0.3 and total_chars > 100:
         penalty = round((0.3 - cjk_ratio) * 40)
         score -= penalty
         deductions.append((penalty, f"中文字符占比仅 {cjk_ratio:.0%}，可能含大量编码污染或非中文内容"))
 
-    # 8. Content repetition (detect duplicated segments beyond ASR stutter)
+    # 9. Content repetition (detect duplicated segments beyond ASR stutter)
     if len(segments) >= 10:
         text_samples = [seg.get("text", "").strip() for seg in segments if len(seg.get("text", "").strip()) >= 4]
         if len(text_samples) >= 10:

@@ -17,6 +17,14 @@ SUBSECTION_RE = re.compile(r"^###\s+.*?$|^####\s+.*?$", re.MULTILINE)
 ANCHOR_RE = re.compile(r"\[\[插图(\d+)\]\]")
 TOKEN_RE = re.compile(r"[A-Za-z0-9一-鿿]{2,}")
 
+# Regex to match the entire "## 结构化图示输出" section (including the JSON code block).
+# Used to strip raw JSON from the final markdown and optionally replace with
+# rendered diagram images.
+DIAGRAM_JSON_SECTION_RE = re.compile(
+    r"\n##\s+结构化图示输出\s*\n+```json\s*\n[\s\S]*?\n```\s*$",
+    re.MULTILINE,
+)
+
 
 
 DATE_PATTERN = re.compile(r"^(\d{4})(\d{2})(\d{2})")
@@ -383,22 +391,18 @@ def inject_images_into_markdown(
                 next_image_number = image_number
 
     if diagram_entries:
-        # Inject diagrams before ## 结构化图示输出 if present, otherwise append.
-        # Never place content after the structured-diagram JSON block.
-        json_section_re = re.compile(
-            r"\n##\s+结构化图示输出\s*\n```json\b", re.MULTILINE
-        )
-        json_match = json_section_re.search(anchored)
+        # Build diagram image block and strip the raw ## 结构化图示输出
+        # JSON section from the markdown (if still present), replacing it
+        # with the rendered diagram images.
+        diagram_block = _build_appendix_block(diagram_entries, next_image_number)
+        json_match = DIAGRAM_JSON_SECTION_RE.search(anchored)
         if json_match:
-            diagram_block = _build_appendix_block(diagram_entries, next_image_number)
             anchored = (
                 anchored[: json_match.start()]
                 + "\n"
                 + diagram_block
-                + anchored[json_match.start() :]
             )
         else:
-            diagram_block = _build_appendix_block(diagram_entries, next_image_number)
             anchored = normalize_markdown(f"{anchored}\n{diagram_block}")
 
     return anchored

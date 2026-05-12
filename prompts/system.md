@@ -238,18 +238,64 @@
 
 如适合，请在末尾按格式输出结构化图示。**此区块必须是全文最后一部分，其 JSON 代码块结束后不允许再输出任何字符（包括空行、解释、问候语）。**
 
-```markdown
-## 结构化图示输出
+**各类型 JSON 示例：**
+
+`comparison`（并列对比）：
+
 ```json
 {
   "diagrams": [
     {
-      "type": "comparison | flow | formula_map",
-      "title": "...",
-      "summary": "...",
-      "placement_hint": "..."
+      "type": "comparison",
+      "title": "数量积 vs 向量积",
+      "summary": "两大核心向量运算对比",
+      "placement_hint": "正文第一部分末尾",
+      "left_title": "数量积（点积）",
+      "left_items": ["A·B = 分量相乘相加", "结果为标量", "满足交换律"],
+      "right_title": "向量积（叉积）",
+      "right_items": ["A×B = 三阶行列式", "结果为向量", "不满足交换律"]
     }
   ]
 }
 ```
+
+`flow`（步骤流程）：
+
+```json
+{
+  "diagrams": [
+    {
+      "type": "flow",
+      "title": "过三点求平面步骤",
+      "summary": "叉积法构造法向量并代入点法式",
+      "placement_hint": "正文第四部分",
+      "steps": ["任选一点为公共起点", "构造两个向量", "叉积得法向量", "代入点法式"]
+    }
+  ]
+}
+```
+
+`formula_map`（核心公式 + 分支说明）：
+
+```json
+{
+  "diagrams": [
+    {
+      "type": "formula_map",
+      "title": "空间解析几何公式全景",
+      "summary": "本章核心公式框架总览",
+      "placement_hint": "正文末尾",
+      "central_formula": "向量运算 → 平面/直线 → 曲面",
+      "branches": [
+        "点积：A·B = ΣAx·Bx",
+        "叉积：i,j,k 三阶行列式",
+        "点法式：A(x-x₀)+B(y-y₀)+C(z-z₀)=0",
+        "点向式：(x-x₀)/m=(y-y₀)/n=(z-z₀)/p"
+      ]
+    }
+  ]
+}
+```
+
+**注意**：`branches[]`、`steps[]`、`left_items[]`、`right_items[]` 必须是**字符串数组**，不要用 `{"label": "...", "content": "..."}` 对象格式。
 ```

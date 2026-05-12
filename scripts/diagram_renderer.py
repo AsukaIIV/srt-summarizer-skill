@@ -49,6 +49,33 @@ def _clean_string_list(values: Any, limit: int = MAX_ITEMS) -> list[str]:
     return items
 
 
+def _clean_labeled_list(values: Any, limit: int = MAX_ITEMS) -> list[str]:
+    """Normalize a list that may contain plain strings or {label, content} dicts.
+
+    Dict items are formatted as ``label：content`` (fullwidth colon); plain
+    strings pass through as-is.  This handles LLMs that guess an object
+    structure for ``branches[]`` / ``items[]`` fields.
+    """
+    if not isinstance(values, list):
+        return []
+    items: list[str] = []
+    for value in values[:limit]:
+        if isinstance(value, dict):
+            label = _clean_text(value.get("label", ""), limit=24)
+            content = _clean_text(value.get("content", ""), limit=MAX_TEXT_LEN)
+            if content:
+                text = f"{label}：{content}" if label else content
+            elif label:
+                text = label
+            else:
+                continue
+        else:
+            text = _clean_text(value)
+        if text:
+            items.append(text)
+    return items
+
+
 def _normalize_spec(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -69,8 +96,8 @@ def _normalize_spec(raw: Any) -> dict[str, Any] | None:
     if diagram_type == "comparison":
         left_title = _clean_text(raw.get("left_title"))
         right_title = _clean_text(raw.get("right_title"))
-        left_items = _clean_string_list(raw.get("left_items"))
-        right_items = _clean_string_list(raw.get("right_items"))
+        left_items = _clean_labeled_list(raw.get("left_items"))
+        right_items = _clean_labeled_list(raw.get("right_items"))
         if not left_title or not right_title or (not left_items and not right_items):
             return None
         spec.update(
@@ -83,13 +110,13 @@ def _normalize_spec(raw: Any) -> dict[str, Any] | None:
         )
         return spec
     if diagram_type == "flow":
-        steps = _clean_string_list(raw.get("steps"))
+        steps = _clean_labeled_list(raw.get("steps"))
         if len(steps) < 2:
             return None
         spec["steps"] = steps
         return spec
     central_formula = _clean_text(raw.get("central_formula"), limit=120)
-    branches = _clean_string_list(raw.get("branches"))
+    branches = _clean_labeled_list(raw.get("branches"))
     if not central_formula or not branches:
         return None
     spec.update({"central_formula": central_formula, "branches": branches})
@@ -479,7 +506,7 @@ def _render_formula_map(spec: dict[str, Any], out_path: str) -> dict[str, str]:
         # connector from centre to branch
         s_y = cbox[3] + 20
         t_y = bb[1] - 16
-        s_x = 700 if (bb[0] + bb[2]) // 2 < 700 else 700
+        s_x = 700
         t_x = (bb[0] + bb[2]) // 2
         # rounded connector path
         mid_y = (s_y + t_y) // 2
