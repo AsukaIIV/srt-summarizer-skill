@@ -30,3 +30,6 @@ output*/
 # Environment
 .env
 .env.local
+
+# cluade
+.cluade/
