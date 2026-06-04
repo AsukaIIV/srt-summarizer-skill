@@ -8,7 +8,11 @@ import re
 from datetime import datetime
 
 SUPPORTED_EXT = (".srt", ".txt", ".md")
+SUPPORTED_AUDIO_EXT = (".m4a", ".mp3", ".wav", ".ogg", ".flac")
 SUPPORTED_VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".m4v")
+
+# SRT naming patterns: .zh.whisperjav.srt, .zh.srt, .en.srt
+SRT_SUFFIX_PATTERN = re.compile(r"(\.(zh|en|ja)(\.whisperjav)?)?\.srt$", re.IGNORECASE)
 
 NOISE_TOKENS = {
     "1080p", "720p", "2160p", "avc", "hevc", "x264", "x265",
@@ -39,6 +43,64 @@ def scan_videos(directory: str) -> list[str]:
             if fn.lower().endswith(SUPPORTED_VIDEO_EXT):
                 found.append(os.path.join(root, fn))
     return found
+
+
+def scan_audio(directory: str) -> list[str]:
+    """Scan a directory recursively for audio files."""
+    found: list[str] = []
+    for root, _, files in os.walk(directory):
+        for fn in sorted(files):
+            if fn.lower().endswith(SUPPORTED_AUDIO_EXT):
+                found.append(os.path.join(root, fn))
+    return found
+
+
+def find_audio_transcripts(audio_path: str, search_dir: str | None = None) -> list[str]:
+    """Find transcript (.srt/.txt/.md) files matching an audio recording.
+
+    Matching strategies:
+      1. Exact filename stem match in same dir (e.g. 20260521_080220.zh.whisperjav.srt)
+      2. Exact filename stem match in a search_dir
+      3. Date-based prefix match (YYYYMMDD)
+    """
+    audio_stem = os.path.splitext(os.path.basename(audio_path))[0]
+    audio_stem_lower = audio_stem.lower()
+    audio_dir = os.path.dirname(audio_path)
+
+    candidates: list[str] = []
+
+    # Strategy 1: same directory
+    for f in sorted(os.listdir(audio_dir)):
+        if f.lower().endswith(SUPPORTED_EXT):
+            f_stem = os.path.splitext(f)[0]
+            # Handle suffix patterns like .zh.whisperjav.srt
+            f_base = SRT_SUFFIX_PATTERN.sub("", f_stem)
+            if f_base == audio_stem:
+                candidates.append(os.path.join(audio_dir, f))
+
+    # Strategy 2: search_dir
+    if search_dir and os.path.isdir(search_dir):
+        for root, _, files in os.walk(search_dir):
+            for f in sorted(files):
+                if f.lower().endswith(SUPPORTED_EXT):
+                    f_stem = os.path.splitext(f)[0]
+                    f_base = SRT_SUFFIX_PATTERN.sub("", f_stem)
+                    if f_base == audio_stem:
+                        candidates.append(os.path.join(root, f))
+
+    # Strategy 3: date prefix match (YYYYMMDD)
+    date_match = re.match(r"(\d{8})", audio_stem)
+    if date_match:
+        date_prefix = date_match.group(1)
+        for root, _, files in os.walk(search_dir or audio_dir):
+            for f in sorted(files):
+                if f.lower().endswith(SUPPORTED_EXT):
+                    f_stem = os.path.splitext(f)[0]
+                    f_base = SRT_SUFFIX_PATTERN.sub("", f_stem)
+                    if f_base.startswith(date_prefix) and f_base != audio_stem:
+                        candidates.append(os.path.join(root, f))
+
+    return sorted(set(candidates))  # deduplicate
 
 
 def _normalize_name(path: str) -> str:

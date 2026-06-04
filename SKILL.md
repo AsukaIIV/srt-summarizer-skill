@@ -2,8 +2,8 @@
 name: srt-summarizer
 description: >
   将课堂字幕(.srt)、转录文本(.txt/.md)和视频整理为结构化 Markdown 课堂笔记。
-  支持 SRT 时间轴解析、视频截图提取、结构化图示渲染(comparison/flow/formula_map)、
-  图文混排和五段式笔记输出。典型触发场景：用户提供字幕文件路径或课程资料目录，
+  支持 SRT 时间轴解析、视频截图提取、五段式笔记输出。
+  典型触发场景：用户提供字幕文件路径或课程资料目录，
   要求整理成课堂笔记、听课总结、复习资料。
 ---
 
@@ -11,28 +11,31 @@ description: >
 
 AI 驱动的课堂录播整理工具。把字幕、转录文本和视频整理成结构化的五段式 Markdown 课堂笔记。
 
-## 触发示例
+## 输入约定
 
-- `/srt-summarizer ~/courses/physics101/`
-- `/srt-summarizer lesson1.srt`
-- `/srt-summarizer lecture1.srt lecture1.mp4`
-- `帮我把这个文件夹里的课堂字幕整理成笔记`
-- `把 lesson.srt 总结为课堂笔记`
+**本 skill 不执行语音转文字（ASR）。** 用户必须自行提供 `.srt`（字幕文件）、`.txt`
+或 `.md`（转录文本）。如果用户只提供了录音/视频文件（`.m4a`/`.mp3`/`.mp4`），
+告知用户先完成 ASR 转写。
 
-## 依赖检查
+### 扩展输入：PDF 文件处理
 
-本 skill 的辅助脚本在 `scripts/` 目录下。首次使用前，建议检查可选依赖：
+用户可能提供 PPT 转 PDF 格式的课堂讲义。**不要直接用 LLM 臆造内容**——必须先用
+工具提取文本：
 
 ```bash
-# 核心依赖（Python 3.10+ 标准库，无需安装）
-python3 -c "import re, os, json, datetime; print('核心依赖 OK')"
+# 首选：poppler-utils
+sudo apt-get install -y poppler-utils
+pdftotext -layout 讲义.pdf 讲义_text.txt
 
-# 可选：视频截图提取
-pip install opencv-python   # 不需要视频抽帧可跳过
+# 次选：markitdown
+pip install markitdown && markitdown 讲义.pdf > 讲义_text.txt
 
-# 可选：结构化图示渲染
-pip install Pillow           # 不需要图示渲染可跳过
+# 三选：pymupdf OCR
+pip install pymupdf
+python3 -c "import fitz; doc=fitz.open('讲义.pdf'); [print(f'--- 第{i+1}页 ---', page.get_text()) for i,page in enumerate(doc)]"
 ```
+
+提取后的文本（30KB-60KB/章）可直接作为 LLM 上下文。
 
 ## 工作流
 
@@ -44,274 +47,243 @@ pip install Pillow           # 不需要图示渲染可跳过
 python3 scripts/scanner.py <target_path>
 ```
 
-或者直接在 Python 中调用：
-
-```python
-from scripts.scanner import scan_and_pair
-result = scan_and_pair(target_path)
-```
-
-`scan_and_pair()` 返回：
-
-```python
-{
-    "transcripts": [...],   # 发现的字幕/文本文件
-    "videos": [...],        # 发现的视频文件
-    "lessons": [            # 配对结果
-        {
-            "lesson_id": str,
-            "transcript_path": str,
-            "video_path": str,    # 可能为空字符串
-            "source_label": str,
-        }
-    ],
-    "is_directory": bool,
-    "directory": str,
-}
-```
-
-将扫描结果展示给用户确认。如果发现多个课程，询问用户：
-- 全部处理
-- 指定处理其中几个
-- 是否添加往期笔记文件作为上下文
+`scan_and_pair()` 返回配对的字幕/视频信息展示给用户确认。
 
 ### 第二步：解析字幕
 
-对每个 lesson，调用 `scripts/parse_srt.py` 解析字幕内容：
-
 ```python
 from scripts.parse_srt import parse_srt_text, parse_srt_segments
-
 transcript = parse_srt_text(lesson["transcript_path"])
 segments = parse_srt_segments(lesson["transcript_path"])
 ```
 
-`parse_srt_text()` 返回带时间戳的转录文本（适合直接放入 prompt）。
-`parse_srt_segments()` 返回结构化分段列表（供视频抽帧和质量评估使用）。
-
-#### 第二步附加：字幕质量评估
-
-解析完成后，**必须运行质量评估**，根据结果调整生成策略：
+#### 字幕质量评估（必做）
 
 ```python
 from scripts.parse_srt import assess_quality, quality_guidance
-
 report = assess_quality(segments)
-print(report.summary())          # 单行摘要，如 "✗ 字幕质量：poor (评分 40/100)"
-guidance = quality_guidance(report)  # 质量引导指令，good 时为空
+guidance = quality_guidance(report)  # good→"" / medium→保守 / poor→严格限制
 ```
 
-报告检测的问题类型：
-- **乱码/编码错误**：Unicode 替换字符、混合编码痕迹
-- **断句问题**：不以句末标点结尾的段过多（ASR 按时间窗口切分导致）
-- **语气填充词**：um/uh/嗯/呃 等
-- **重复词**：ASR 卡顿产生的重复
-- **纯噪音行**：仅含符号数字的行
-- **时长异常**：过短碎片段（<0.3s）或过长段（>30s）
+`guidance` 返回的指令**必须原样拼接**到最终 prompt 的转录文本之前。
 
-得分范围 0-100，分为三档：
-| 评分 | 等级 | 策略 |
-|------|------|------|
-| ≥80 | good | 正常生成，无额外限制 |
-| 50-79 | medium | 保守生成，加强 `[unclear]` 标注，图示降低要求 |
-| <50 | poor | 严格限制：禁止硬猜术语、要求跨段拼接语义、**不输出**结构化图示、缺失内容显式标注 |
-
-`quality_guidance()` 返回的指令**必须原样拼接**到最终 prompt 的转录文本之前。
-
-#### 第二步附加：领域分类
-
-质量评估完成后，**必须运行领域分类器**，判断课程属于 STEM 还是社会科学，以调整生成策略：
+#### 领域分类（必做）
 
 ```python
 from scripts.parse_srt import classify_domain, domain_guidance
-
-domain_report = classify_domain(
-    segments,
-    course_name=course_name,
-    transcript_path=lesson["transcript_path"],
-)
-print(domain_report.summary())        # 如 "领域分类：社科/人文 (置信度 85%)"
-domain_guide = domain_guidance(domain_report)  # STEM 时为空字符串
+domain_report = classify_domain(segments, course_name=..., transcript_path=...)
+domain_guide = domain_guidance(domain_report)  # STEM→"" / 社科→调整要素
 ```
 
-分类基于三路加权信号：
-1. 课程名关键词匹配（权重 3x）
-2. 字幕内容关键词采样（权重 1x，采样 200 段）
-3. 文件名关键词匹配（权重 2x）
-
-`domain_guidance()` 对 STEM 返回空字符串（`system.md` 已为 STEM 优化），对社科类返回正文要素替换、考试栏目调整、图示类型偏好等指令。`domain_guidance()` 返回的指令**必须在 quality_guidance 之后、转录文本之前**拼接到 prompt 中。
+`domain_guide` 在 `quality_guidance` 之后、转录文本之前拼接到 prompt。
 
 ### 第三步：提取视频截图（可选）
 
-如果 lesson 有配对的视频且用户需要图文混排：
-
 ```python
 from scripts.video_frames import extract_frames
-
 saved_paths, frame_items = extract_frames(
-    video_path=lesson["video_path"],
-    image_dir=image_dir,
-    max_frames=8,
-    subtitle_segments=segments,
-    course_name=course_name,
+    video_path=..., image_dir=..., max_frames=8,
+    subtitle_segments=segments, course_name=...,
 )
 ```
 
-无 opencv 时给出提示并降级为纯字幕模式。
-
 ### 第四步：生成课堂笔记（核心）
 
-这是 skill 的核心步骤 —— **由 Claude 自身完成**，不需要调用外部 API。
-
-1. 读取 `prompts/system.md` 作为系统级输出规范
-2. 读取转录文本内容
-3. 收集课程上下文信息（向用户询问或从文件内容推断）：
-   - 课程名称
-   - 课程总体要求（可选）
-   - 往期笔记内容（可选）
-4. 如果有视频截图，生成截图描述文本（含时间戳、内容提示）
-5. 按照 `prompts/system.md` 中规定的**五段结构**生成课堂笔记：
-   - **一、课程概要**（表格：上课日期、课程名称、本节范围、主讲教师、本节课导言）
-   - **二、正文内容**（按讲课顺序分部分，每部分含三级标题知识点）
-   - **三、教师强调重点**（引用块格式，逐条列出）
-   - **四、作业与考试重点**（作业题目、必考公式汇总表、必记概念清单、答题规范）
-   - **五、课程总结**（5-8句脉络概括 + 下节课预告）
-6. 如果内容适合，在末尾输出 `## 结构化图示输出` 区块，包含 JSON 格式的图示规格
-7. 将质量引导指令（`quality_guidance`）和领域引导指令（`domain_guidance`）拼接后，放在转录文本之前，形成完整的用户 prompt
-
-**重要约束**（已在 system.md 中详细规定）：
-- 严格五段结构，不得缺段、并段、重排
-- 信息要密、解释要准、层次要稳
-- 不臆造内容，不确定处标注 `[unclear]`
-- 公式使用行内代码 `` `n₁sinθ₁ = n₂sinθ₂` ``
-- 只使用 `##`、`###`、`####` 三级标题
-
-### 第五步：提取并渲染结构化图示
-
-从 Claude 生成的 Markdown 中提取结构化图示 JSON：
+使用 **`delegate_task` 子代理模式**（子代理继承主会话模型，保持一致）：
 
 ```python
-from scripts.diagram_renderer import extract_diagram_specs, render_diagram_entries
-
-clean_content, diagram_specs, warnings = extract_diagram_specs(claude_output)
-diagram_entries, render_warnings = render_diagram_entries(diagram_specs, image_dir)
+delegate_task(
+    goal="生成课堂笔记（超详细五段式）",
+    context="SRT路径 + 质量评估 + 领域分类结果 + 课程信息 + system.md路径",
+    toolsets=["terminal", "file"],
+)
 ```
 
-对每个警告信息，告知用户。
+子代理的 toolset 必须为 `["terminal", "file"]`。子代理用 `read_file` 加载 SRT
+和 system.md，用 `terminal` 或 `write_file` 保存结果。
 
-### 第六步：组装并写出输出
+> 子代理自动继承主会话的模型，不需要折腾换模型。同一模型跑到底。
+
+#### 生成粒度决策
+
+扫描完输入后，根据文件数量判断生成粒度：
+
+**① 少量文件（≤5 个）** → 直接按课时生成
+- 每个文件对应一节课，逐节生成独立笔记
+- 无需询问用户，默认执行
+
+**② 成体系文件（≥6 个）** → 先询问用户
+- 扫描结果展示给用户后，直接提问生成粒度：
+  - **按课时**：每个 SRT 文件生成一篇独立笔记（适合散课）
+  - **按章节**：按文件名中的章节号（如 `【第1章】`）分组合并，每章生成一篇笔记（适合完整课程）
+  - **指定脉络**：用户自定分组规则，按指定方式生成
+
+示例：在回复中直接问用户「共发现 N 节课，你想按课时逐节生成、按章节合并生成，还是指定其他分组方式？」
+
+按章节分组时，用 `scripts/scanner.py` 中的章节正则匹配逻辑：
+```python
+import re
+m = re.search(r'【第(\d+)章】', filename)
+chapter = f"第{m.group(1)}章" if m else "其他"
+```
+
+#### 五段式笔记结构（system.md 中已固化）
+
+1. **一、课程概要** — 表格：日期、课程名、范围、教师、导言
+2. **二、正文内容** — 逐知识点展开（定义→公式→推导→例题→注意事项）
+3. **三、教师强调重点** — 引用块格式
+4. **四、作业与考试重点** — 作业题、必考公式、必记概念、答题规范
+5. **五、课程总结** — 5-8 句脉络概括 + 下节课预告
+
+**超详细默认标准（2026-06 起固化）**：
+
+- 知识地图：正文开头 `$$\begin{array}{c}...\end{array}$$` 紧凑格式
+- 六要素展开：每知识点 定义→公式→推导→例题→注意点
+- 例题每章≥8道，step-by-step
+- 题型总览表 + 易错点汇总 + 常用结论速查 齐全
+- 每节末尾知识地图替换 JSON 结构化图示
+- 所有公式 LaTeX（`$...$` / `$$...$$`），禁止 backtick
+- Unicode 数学符号（λ, μ, θ, ω, η, ≈, ·, ½, √ 等）转 LaTeX 命令
+
+#### 知识地图规则（用户偏好）
+
+在 `## 结构化图示输出` 区块下输出 LaTeX `array` 知识地图（**不是 JSON**）：
+
+```latex
+$$\begin{array}{c}
+\text{知识点A} \\
+\downarrow \\
+\text{知识点B} \\
+\swarrow \searrow \\
+\text{子知识C} \quad \text{子知识D}
+\end{array}$$
+```
+
+- `\downarrow` 表示纵向归属/流向，`\swarrow \searrow` 表示分支
+- 紧凑格式：`$$` 与 `\begin{array}` 之间无换行
+- 保留 `## 结构化图示输出` 标题，替换下方 JSON 内容为 LaTeX array
+
+### 第五步：写出输出
 
 ```python
 from scripts.writer import build_output_paths, write_summary
 
-# lesson_title 由 Claude 根据课堂内容生成，格式建议：
-#   {YYYY-MM-DD}_{第X周}_{本节主题}
-# save_dir 使用课程文件夹，如 "通信电子线路"
 bundle_dir, img_dir, note_path = build_output_paths(
-    source_file=lesson["transcript_path"],
-    save_dir=output_dir,       # 课程文件夹
-    course_name=course_name,
-    lesson_title=lesson_title,  # 每节课的目录名和笔记文件名
+    source_file=..., save_dir=..., course_name=..., lesson_title=...,
 )
-
-# 合并截图条目和图示条目
-all_image_entries = image_entries + diagram_entries
-
-write_summary(
-    out_path=note_path,
-    source_path=lesson["transcript_path"],
-    content=clean_content,
-    image_entries=all_image_entries,
-)
+write_summary(out_path=note_path, source_path=..., content=clean_content)
 ```
 
-### 第七步：汇报结果
+### 第六步：汇报结果
 
-输出最终结果摘要，包括：
-- 成功/失败数量
-- 每个课程的输出目录和文件路径
-- 生成时间
-- 字符统计
-- 如有警告（图示渲染失败、截图提取不足等），一并列出
-
-## 多课程批量处理
-
-当用户提供的是一个包含多个字幕文件的目录时：
-
-1. 先展示扫描结果（所有发现的课程配对）
-2. 询问用户是否批量处理，或选择其中几个
-3. 如果批量处理，逐个课程执行第二步到第六步
-4. 可以询问用户是否使用统一的课程名和总体要求
-5. 每处理完一个课程输出进度
+**汇报前验证文件真实存在。** 先 `ls` 确认实际文件再制成表格汇报。
 
 ## 输出目录结构
 
-**每节课必须独立目录**，保证笔记多了之后便于管理。课程文件夹为顶层容器，每节课在该文件夹内拥有独立子目录：
-
-```text
+```
 {课程名}/
-└── {课程目录名}/
-    ├── {课程目录名}.md
+└── {YYYY-MM-DD_第X周_本节主题}/
+    ├── {YYYY-MM-DD_第X周_本节主题}.md
     └── imgs/
-        ├── 2026-05-08_课程名_001_frame-hh-mm-ss.png  # 课堂截图
-        └── diagram_01_comparison.png                  # 结构化图示
+        ├── {date}_frame-hh-mm-ss.png
+        └── diagram_01_comparison.png
 ```
 
-- `{课程名}`：课程文件夹，同一课程的所有笔记都在此目录下
-- `{课程目录名}`：每节课的独立子目录，命名建议为 `{YYYY-MM-DD}_{第X周}_{本节主题}`
-- 笔记 `.md` 文件与 `imgs/` 平级放在该子目录内
+## 已知陷阱与应对（详细版见 `references/batch-processing.md`）
 
-示例：
+### 代理 API 限制
+- **大 payload 断连**：单次请求≥~100KB 可能 `Broken pipe`，切 ≤20KB 块
+- **间歇性 504**：与 payload 大小无关，指数退避重试 6 次（30s→60s→120s→240s→480s→600s）
+- **禁止 DeepSeek 官方直连**，全部走代理 47.251.108.225:3000
+- **组级缓存策略**：`_cache` 目录逐组缓存，中断可续跑
 
-```text
-通信电子线路/
-├── 2026-03-31_第5周_丙类谐振功放直流馈电与偏置电路/
-│   ├── 2026-03-31_第5周_丙类谐振功放直流馈电与偏置电路.md
-│   └── imgs/
-│       └── diagram_01_comparison.png
-└── 2026-04-07_第6周_倍频器与D类功放/
-    ├── 2026-04-07_第6周_倍频器与D类功放.md
-    └── imgs/
-        └── diagram_01_flow.png
+### delegate_task 问题
+- 子代理格式偏差（用 # 一级标题、缺段、$$ 块级而非行内）→ context 中显式重复约束
+- 子代理可能用 write_file 而非执行脚本 → 两种保存方式都支持
+- 子代理 600s 超时不适用 5+ 组章节 → 分批并行（每轮 ≤3 个子代理）
+
+### 文件名安全
+章节名中的 `/` 会炸文件路径，必须替换为 `_`：
+`safe_title = title.replace("/", "_").replace("\\", "_")`
+
+### 后处理修复
+批量生成后运行 `scripts/render_all.py` 自动修复格式（JSON图示→LaTeX array、路径修正）。
+验证 `\begin{array}` / `\end{array}` 配平用 `scripts/verify_knowledge_map.py --fix`。
+- 替换 JSON 结构化图示为 LaTeX array
+- 修复绝对路径为相对路径 `imgs/`
+- 确保 `## 结构化图示输出` 在文件末尾
+- 验证 `\begin{array}` / `\end{array}` 平衡（`scripts/verify_knowledge_map.py`）
+
+### 知识地图公式验证
+笔记生成后检查 `$$` 块中的 `array` 配平：
+```bash
+# 精确检查
+python3 -c "
+import re
+with open('笔记.md') as f: text = f.read()
+for i, block in enumerate(re.findall(r'\$\$(.*?)\$\$', text, re.DOTALL)):
+    b = block.count(r'\begin{array}'); e = block.count(r'\end{array}')
+    if b != e: print(f'块#{i}: begin={b} end={e}')
+"
+# 修复过度 \quad 填充
+python3 -c "
+import re,sys; path=sys.argv[1]
+with open(path) as f: text=f.read()
+text=re.sub(r'(\\\\quad\s*){4,}',' \\\\quad ',text)
+with open(path,'w') as f: f.write(text)
+" 笔记.md
 ```
 
-默认输出到当前工作目录。用户可指定输出目录。
+## 多课程批量处理
+
+### 小规模（≤5节）：delegate_task 并行
+每轮 3 个并行子代理。context 中给 SRT 路径、system.md 路径、保存脚本模板。
+
+### 大规模（≥10节）：分批并行
+每轮 3 个子代理，分多轮处理。子代理自动继承主会话模型。
+```bash
+python3 scripts/batch_prepare.py \
+  --course 光纤通信 \
+  --offline-dir /path/to/srt \
+  --out-dir /path/to/output
+```
+
+### B站/网络课大量小SRT
+**最优策略**：按章节合并 SRT → 按章生成笔记。详见 `references/bilibili-course-chapter-grouping.md`。
+
+## Obsidian 集成后处理
+
+srt-summarizer 输出的五段式 Markdown 笔记可加工为 Obsidian 结构化知识库
+（YAML frontmatter → 课程大纲 MOC → Dataview 汇总页）。
+详见 `references/obsidian-post-processing.md`。LaTeX 显示优化 CSS 见 `references/obsidian-latex-css.md`。
+
+## LaTeX 公式转换
+
+笔记中的 Unicode 数学字符需转换为 LaTeX 命令。`scripts/convert_latex_cleanup.py`
+自动处理，支持自定义路径：
+```bash
+python3 scripts/convert_latex_cleanup.py /path/to/notes/
+```
+
+常见映射：`λ→\lambda`、`μ→\mu`、`θ→\theta`、`ω→\omega`、`η→\eta`、
+`≈→\approx`、`·→\cdot`、`½→\frac{1}{2}`、`√→\sqrt{}`、`₁→_{1}`、`²→^{2}`
+
+## 笔记后处理：思维导图 & 背诵清单
+
+笔记生成后，基于已生成的超详细笔记生成配套材料。用 `delegate_task` 处理即可。
+
+## 依赖检查
+
+```bash
+# 核心依赖（Python 3.10+ 标准库）
+python3 -c "import re, os, json, datetime; print('OK')"
+# 可选：视频截图
+pip install opencv-python
+```
 
 ## 注意事项
 
 - 首次使用建议先用一节较短课程测试
-- 转录质量较差的内容（如机器听写有大量错误），应在 prompt 中提醒 Claude 标注 `[unclear]`
-- 视频任务无有效截图时应报告失败（不降级为纯文本），因为截图是用户特意提供的教学材料
-- 纯字幕文件无需视频，直接生成纯文本笔记
-- 如果用户指定了往期笔记文件，应在 prompt 中包含其内容以保持课程连续性
-
-## 常见问题
-
-### Pillow 未安装（结构化图示无法渲染）
-
-```
-Pillow 未安装，跳过图示渲染。请运行: pip install Pillow
-```
-
-**解决**：`pip install Pillow`。不影响笔记正文生成，只是没有结构化对比图/流程图/公式图。
-
-### opencv-python 未安装（视频截图无法提取）
-
-```
-opencv-python 未安装。请运行: pip install opencv-python
-```
-
-**解决**：`pip install opencv-python`。不影响纯字幕模式，视频文件会被跳过。
-
-### 中文字体找不到（图示中出现方块字或乱码）
-
-**解决**：确保 `fonts/HarmonyOS_Sans_SC_Medium.ttf` 存在。Pillow 会依次尝试：项目内字体 → 系统 PingFang/STHeiti → NotoSansCJK → 默认字体。
-
-### 字幕质量报告显示 "poor"
-
-**原因**：ASR 转录质量极差（大量乱码、无标点、纯噪音段）。  
-**解决**：skill 会自动注入保守生成策略（强制标注 `[unclear]`、不输出图示、要求跨段拼接语义）。如果报告明显不准确，检查字幕文件编码是否为 UTF-8。
-
-### 单文件模式下找不到视频
-
-**解决**：将字幕和视频放在同一目录下，确保文件名至少部分匹配（如 `lesson1.srt` + `lesson1.mp4`）。完全不同的文件名不会被配对。
+- 转录质量差的内容，prompt 中提醒标注 `[unclear]`
+- 子代理的 toolset 必须是 `["terminal", "file"]`
+- 保存脚本模板详见 `references/delegate-task-template.md`
