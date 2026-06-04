@@ -19,7 +19,7 @@ import os, sys, json, time, urllib.request
 PDF_DIR = "/vol2/1000/hdd0/重要文件/obsidian_library/课程录音/微机原理"
 OUTPUT_DIR = os.path.join(PDF_DIR, "notes")
 API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-e76f44fa960d45c49208d1e9ecf465d44")
+API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 MODEL = "deepseek-chat"  # v4-flash
 
 chapters = [
@@ -37,7 +37,7 @@ SYSTEM_PROMPT = """你是一位专业的课堂笔记生成专家，输出超详�
 4. 题型总览表 + 易错点汇总 + 常用结论速查（齐备）
 5. 每章至少8道典型例题的完整求解过程
 6. LaTeX公式：行内$...$，块级$$...$$
-7. 文末输出 ## 结构化图示输出 + 至少1张 diagram JSON（comparison/flow/formula_map）
+7. 文末输出 ## 结构化图示输出 + 至少1张 LaTeX array 知识地图
 8. 基于教材原文，不脱离内容臆造"""
 # ===== 配置区结束 =====
 

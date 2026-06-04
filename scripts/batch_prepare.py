@@ -11,7 +11,7 @@ Usage:
         --out-dir /path/to/output
 """
 
-import json, os, sys, traceback, argparse
+import json, os, re, sys, traceback, argparse
 from datetime import datetime
 
 # Add skill root to path
@@ -63,7 +63,7 @@ def get_source_type(lesson, offline_dir, online_dir):
     return "未知"
 
 
-def get_lesson_title(lesson, source_type, idx, course_name, week_map, offline_dir, online_dir):
+def get_lesson_title(lesson, idx, course_name, week_map):
     """Generate lesson title: YYYY-MM-DD_{第X周}_{topic}"""
     from scripts._utils import sanitize_filename
     stem = os.path.splitext(os.path.basename(lesson["transcript_path"]))[0]
@@ -96,8 +96,6 @@ def get_lesson_title(lesson, source_type, idx, course_name, week_map, offline_di
 
 def process_lesson(lesson, idx, total, course_name, output_base, week_map, offline_dir, online_dir):
     """Process a single lesson: parse, assess, classify."""
-    import re  # local import for sub-function usage
-
     source_type = get_source_type(lesson, offline_dir, online_dir)
     print(f"\n{'='*60}")
     print(f"处理第 {idx+1}/{total} 节课 [{source_type}]")
@@ -166,9 +164,8 @@ def process_lesson(lesson, idx, total, course_name, output_base, week_map, offli
         video_path = lesson["video_path"]
         if os.path.isfile(video_path):
             try:
-                lesson_title = get_lesson_title(lesson, source_type, idx,
-                                                 course_name, week_map,
-                                                 offline_dir, online_dir)
+                lesson_title = get_lesson_title(lesson, idx,
+                                                 course_name, week_map)
                 from scripts.writer import build_output_paths
                 _, img_dir, _ = build_output_paths(
                     source_file=lesson["transcript_path"],
@@ -206,9 +203,8 @@ def process_lesson(lesson, idx, total, course_name, output_base, week_map, offli
             print(f"  线下课：无需截图")
 
     # Step 5: Generate lesson title info
-    result["lesson_title"] = get_lesson_title(lesson, source_type, idx,
-                                               course_name, week_map,
-                                               offline_dir, online_dir)
+    result["lesson_title"] = get_lesson_title(lesson, idx,
+                                               course_name, week_map)
 
     result["status"] = "ready"
     return result
@@ -310,8 +306,7 @@ def main():
     print(f"\n报告已保存：{report_path}")
 
     print(f"\n{'='*60}")
-    print("下一步：逐节生成笔记")
-    print(f"使用命令：python3 scripts/batch_generate.py")
+    print("下一步：逐节使用 delegate_task 生成笔记")
 
 
 if __name__ == "__main__":

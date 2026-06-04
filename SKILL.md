@@ -141,7 +141,7 @@ chapter = f"第{m.group(1)}章" if m else "其他"
 - 六要素展开：每知识点 定义→公式→推导→例题→注意点
 - 例题每章≥8道，step-by-step
 - 题型总览表 + 易错点汇总 + 常用结论速查 齐全
-- 每节末尾知识地图替换 JSON 结构化图示
+- 每节末尾输出 LaTeX array 知识地图
 - 所有公式 LaTeX（`$...$` / `$$...$$`），禁止 backtick
 - Unicode 数学符号（λ, μ, θ, ω, η, ≈, ·, ½, √ 等）转 LaTeX 命令
 
@@ -161,7 +161,6 @@ $$\begin{array}{c}
 
 - `\downarrow` 表示纵向归属/流向，`\swarrow \searrow` 表示分支
 - 紧凑格式：`$$` 与 `\begin{array}` 之间无换行
-- 保留 `## 结构化图示输出` 标题，替换下方 JSON 内容为 LaTeX array
 
 ### 第五步：写出输出
 
@@ -208,11 +207,11 @@ write_summary(out_path=note_path, source_path=..., content=clean_content)
 
 ### 后处理修复
 批量生成后运行 `scripts/render_all.py` 自动修复格式（JSON图示→LaTeX array、路径修正）。
-验证 `\begin{array}` / `\end{array}` 配平用 `scripts/verify_knowledge_map.py --fix`。
 - 替换 JSON 结构化图示为 LaTeX array
 - 修复绝对路径为相对路径 `imgs/`
 - 确保 `## 结构化图示输出` 在文件末尾
-- 验证 `\begin{array}` / `\end{array}` 平衡（`scripts/verify_knowledge_map.py`）
+
+验证 `\begin{array}` / `\end{array}` 配平用 `scripts/verify_knowledge_map.py --fix`。
 
 ### 知识地图公式验证
 笔记生成后检查 `$$` 块中的 `array` 配平：

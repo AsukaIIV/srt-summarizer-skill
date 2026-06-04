@@ -42,9 +42,10 @@ print(f'SAVED:{note_path}')
 2. **在 context 中显式重复格式要求**，不要只靠 system.md
 3. **每轮结束后检查文件开头**验证格式，不达标的重做
 
-### 子代理配置要点 必须包含 `["terminal", "file"]`——需要 `read_file` 加载 SRT 和 system.md，需要 `terminal` 执行保存脚本
+### 子代理配置要点
+1. **toolset 必须包含 `["terminal", "file"]`**——需要 `read_file` 加载 SRT 和 system.md，需要 `terminal` 执行保存脚本
 2. **不要在 context 里传完整 SRT 内容**——子代理自己用 `read_file` 读取，避免 context 过大
-3. **system.md 也要让子代理自己读**：`先读取 /home/user/.hermes/skills/srt-summarizer/prompts/system.md 了解五段式笔记格式规范`
+3. **system.md 也要让子代理自己读**：`先读取 ~/skills/srt-summarizer/prompts/system.md 了解五段式笔记格式规范`
 4. **LaTeX 偏好直接在 context 里说**：不用修改 system.md，子代理遵守 context 指令优先于 system.md
 5. **title 要告诉子代理生成后填入**：`TITLE='YYYY-MM-DD_第X周_根据内容确定标题'`，子代理根据课程内容替换
 6. **子代理可能用 write_file 而非 terminal** 来保存 note_content——两种方式都要支持

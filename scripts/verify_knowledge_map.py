@@ -26,16 +26,21 @@ def check_and_fix_file(path: str, fix: bool = False) -> list[str]:
     modified = False
 
     # Check 1: Remove code fences wrapping $$...$$
-    for m in re.finditer(r'```(?:latex)?\s*\n\$\$', content):
+    # Process matches in reverse to avoid position drift when modifying content
+    for m in reversed(list(re.finditer(r'```(?:latex)?\s*\n\$\$', content))):
         line_num = content[:m.start()].count('\n') + 1
         issues.append(f"  L{line_num}: 代码块围栏包裹 $$（Obsidian不渲染）")
         if fix:
-            # Remove the ```latex or ``` before $$
-            content = content[:m.start()] + content[m.start():].lstrip('`').lstrip('latex').lstrip('\n')
+            rest = content[m.start():]
+            if rest.startswith("```latex"):
+                content = content[:m.start()] + rest[len("```latex"):].lstrip('\n')
+            elif rest.startswith("```"):
+                content = content[:m.start()] + rest[len("```"):].lstrip('\n')
             modified = True
 
     # Check 2: Find all $$...$$ blocks and check array balance
-    for m in re.finditer(r'\$\$(.*?)\$\$', content, re.DOTALL):
+    # Process in reverse to avoid position drift when inserting \end{array}
+    for m in reversed(list(re.finditer(r'\$\$(.*?)\$\$', content, re.DOTALL))):
         block = m.group(1)
         start = m.start()
 

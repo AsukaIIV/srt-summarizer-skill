@@ -64,7 +64,6 @@ def find_audio_transcripts(audio_path: str, search_dir: str | None = None) -> li
       3. Date-based prefix match (YYYYMMDD)
     """
     audio_stem = os.path.splitext(os.path.basename(audio_path))[0]
-    audio_stem_lower = audio_stem.lower()
     audio_dir = os.path.dirname(audio_path)
 
     candidates: list[str] = []
@@ -447,3 +446,18 @@ def load_context_content(context_notes: list[dict]) -> str:
         label = f"📘 {note.get('date', '未知日期')} — {note.get('filename', '')}"
         blocks.append(f"### {label}\n\n{condensed}")
     return "\n\n---\n\n".join(blocks)
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        print("用法: python3 scripts/scanner.py <target_path>")
+        sys.exit(1)
+    result = scan_and_pair(sys.argv[1])
+    print(f"目录: {result['directory']}")
+    print(f"字幕文件: {len(result['transcripts'])} 个")
+    print(f"视频文件: {len(result['videos'])} 个")
+    print(f"配对课程: {len(result['lessons'])} 节")
+    for i, lesson in enumerate(result["lessons"], 1):
+        print(f"  {i}. {os.path.basename(lesson['transcript_path'])}"
+              f"{'  ← 视频:' + os.path.basename(lesson['video_path']) if lesson['video_path'] else ''}")
